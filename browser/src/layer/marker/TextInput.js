@@ -290,7 +290,7 @@ L.TextInput = L.Layer.extend({
 
 	getValue: function() {
 		var value = this._textArea.value;
-		if (this._map.formulabar && this._map.formulabar.hasFocus())
+		if (this._isFormulabarActive())
 			value = this._map.formulabar.getValue();
 		return value;
 	},
@@ -712,13 +712,6 @@ L.TextInput = L.Layer.extend({
 		if (removeAfter > 0)
 			this._emptyArea();
 
-		// special handling for formulabar
-		if (content.length) {
-			var contentString = this.codePointsToString(content);
-			if (contentString[matchTo] === '\n' || contentString.charCodeAt(matchTo) === 13)
-				this._finishFormulabarEditing();
-		}
-
 		// special handling for mentions
 		if (docLayer._typingMention)  {
 			if (removeBefore === 0) {
@@ -738,13 +731,8 @@ L.TextInput = L.Layer.extend({
 		}
 	},
 
-	_finishFormulabarEditing: function() {
-		// now we use that only on touch devices
-		if (window.mode.isDesktop())
-			return;
-
-		if (this._map && this._map.formulabar && this._map.formulabar.hasFocus())
-			this._map.dispatch('acceptformula');
+	_isFormulabarActive: function() {
+		return this._map.formulabar && this._map.formulabar.hasFocus();
 	},
 
 	// Sends the given (UTF-8) string of text to coolwsd, as IME (text composition)
@@ -767,7 +755,7 @@ L.TextInput = L.Layer.extend({
 		if (text === '\n' || (text.length === 1 && text.charCodeAt(0) === 13)) {
 			// The composition messages doesn't play well with just a line break,
 			// therefore send a keystroke.
-			var unoKeyCode = this._linebreakHint ? 5376 : 1280;
+			var unoKeyCode = (this._linebreakHint || this._isFormulabarActive()) ? 5376 : 1280;
 			this._sendKeyEvent(13, unoKeyCode);
 			this._emptyArea();
 		} else {
@@ -779,8 +767,12 @@ L.TextInput = L.Layer.extend({
 			var l = parts.length;
 			for (var i = 0; i < l; i++) {
 				if (i !== 0) {
-					this._sendKeyEvent(13, 1280);
-					this._emptyArea();
+					if (this._isFormulabarActive())
+						this._sendKeyEvent(13, 5376);
+					else {
+						this._sendKeyEvent(13, 1280);
+						this._emptyArea();
+					}
 				}
 				if (parts[i].length > 0) {
 					this._sendCompositionEvent(parts[i]);
@@ -810,8 +802,8 @@ L.TextInput = L.Layer.extend({
 		this._lastContent = [];
 
 		this._textArea.value = this._preSpaceChar + this._postSpaceChar;
-		if (this._map && this._map.formulabar && this._map.formulabar.hasFocus())
-			this._map.formulabar.setValue('');
+		if (this._map && this._isFormulabarActive())
+			this._map.formulabar.refreshSelection();
 
 		// avoid setting the focus keyboard
 		if (!noSelect) {

@@ -1,20 +1,16 @@
 /* -*- js-indent-level: 8 -*- */
 /*
- * JSDialog.FormulabarEdit - text field in the fromulabar
+ * JSDialog.FormulabarEdit - text field in the fromulabar, key events are sent using L.TextInput
  *
  * Example JSON:
  * {
  *     id: 'id',
  *     type: 'formulabaredit',
  *     test: 'text content\nsecond line',
- *     useTextInput: true,
- *     rawKeyEvents: false,
  *     cursor: true,
  *     enabled: false
  * }
  *
- * 'useTextInput' instead of typing into field, key events are sent using L.TextInput
- * 'rawKeyEvents' instead of typing into field, key events are sent only to the server using jsdialog events
  * 'cursor' specifies if user can type into the field or it is readonly
  * 'enabled' editable field can be temporarily disabled
  *
@@ -26,11 +22,16 @@
 /* global JSDialog UNOKey UNOModifier */
 
 function _sendSelection(edit, builder) {
+	// for IME/TextInput.js we need to setup cursor at the end
 	var currentText = edit.value;
 	var startPos = edit.selectionStart;
 	var endPos = edit.selectionEnd;
 	var startPara = 0;
 	var endPara = 0;
+
+	edit._startPos = startPos;
+	edit._endPos = endPos;
+	edit._originalLen = currentText.length;
 
 	if (currentText.indexOf('\n') >= 0) {
 		var currentPos = 0;
@@ -82,136 +83,74 @@ function _formulabarEditControl(parentContainer, data, builder) {
 	if (data.enabled === 'false' || data.enabled === false)
 		edit.disabled = true;
 
-	if (data.useTextInput) {
-		// uses TextInput.js logic and events handling (IME for mobile/touch devices)
-		edit.addEventListener('input', builder.map._textInput._onInput.bind(builder.map._textInput));
-		edit.addEventListener('beforeinput', builder.map._textInput._onBeforeInput.bind(builder.map._textInput));
-	} else if (data.rawKeyEvents) {
-		// sends key events over jsdialog
-		var modifier = 0;
+	// uses TextInput.js logic and events handling (IME for mobile/touch devices)
+	edit.addEventListener('input', builder.map._textInput._onInput.bind(builder.map._textInput));
+	edit.addEventListener('beforeinput', builder.map._textInput._onBeforeInput.bind(builder.map._textInput));
 
-		edit.addEventListener('keydown', function(event) {
-			if (edit.disabled) {
-				event.preventDefault();
-				return;
-			}
+	// sends key events over jsdialog
+	var modifier = 0;
 
-			if (event.key === 'Enter') {
-				builder.callback('edit', 'keypress', edit, UNOKey.RETURN | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Escape' || event.key === 'Esc') {
-				builder.callback('edit', 'keypress', edit, UNOKey.ESCAPE | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Left' || event.key === 'ArrowLeft') {
-				builder.callback('edit', 'keypress', edit, UNOKey.LEFT | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Right' || event.key === 'ArrowRight') {
-				builder.callback('edit', 'keypress', edit, UNOKey.RIGHT | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Up' || event.key === 'ArrowUp') {
-				setTimeout(function () { _sendSelection(edit, builder); }, 0);
-			} else if (event.key === 'Down' || event.key === 'ArrowDown') {
-				setTimeout(function () { _sendSelection(edit, builder); }, 0);
-			} else if (event.key === 'Home') {
-				builder.callback('edit', 'keypress', edit, UNOKey.HOME | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'End') {
-				builder.callback('edit', 'keypress', edit, UNOKey.END | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Backspace') {
-				builder.callback('edit', 'keypress', edit, UNOKey.BACKSPACE | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Delete') {
-				builder.callback('edit', 'keypress', edit, UNOKey.DELETE | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Space') {
-				builder.callback('edit', 'keypress', edit, UNOKey.SPACE | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Tab') {
-				builder.callback('edit', 'keypress', edit, UNOKey.TAB | modifier, builder);
-				event.preventDefault();
-			} else if (event.key === 'Shift') {
-				modifier = modifier | UNOModifier.SHIFT;
-				event.preventDefault();
-			} else if (event.key === 'Control') {
-				modifier = modifier | UNOModifier.CTRL;
-				event.preventDefault();
-			} else if (event.key === 'a' && event.ctrlKey) {
-				builder.callback('edit', 'keypress', edit, UNOKey.A | UNOModifier.CTRL, builder);
-			}
-		});
-
-		edit.addEventListener('keyup', function(event) {
-			if (edit.disabled) {
-				event.preventDefault();
-				return;
-			}
-
-			if (event.key === 'Shift') {
-				modifier = modifier & (~UNOModifier.SHIFT);
-				event.preventDefault();
-			} else if (event.key === 'Control') {
-				modifier = modifier & (~UNOModifier.CTRL);
-				event.preventDefault();
-			}
-		});
-
-		edit.addEventListener('blur', function() {
-			modifier = 0;
-		});
-
-		edit.addEventListener('keypress', function(event) {
-			if (edit.disabled) {
-				event.preventDefault();
-				return;
-			}
-
-			if (event.key === 'Enter' ||
-				event.key === 'Escape' ||
-				event.key === 'Esc' ||
-				event.key === 'Left' ||
-				event.key === 'ArrowLeft' ||
-				event.key === 'Right' ||
-				event.key === 'ArrowRight' ||
-				event.key === 'Up' ||
-				event.key === 'ArrowUp' ||
-				event.key === 'Down' ||
-				event.key === 'ArrowDown' ||
-				event.key === 'Home' ||
-				event.key === 'End' ||
-				event.key === 'Backspace' ||
-				event.key === 'Delete' ||
-				event.key === 'Space' ||
-				event.key === 'Tab') {
-				// skip
-			} else {
-				var keyCode = event.keyCode;
-				if (event.ctrlKey) {
-					keyCode = event.key.toUpperCase().charCodeAt(0);
-					keyCode = builder.map.keyboard._toUNOKeyCode(keyCode);
-					keyCode |= UNOModifier.CTRL;
-				}
-
-				builder.callback('edit', 'keypress', edit, keyCode, builder);
-			}
-
+	edit.addEventListener('keydown', function(event) {
+		if (edit.disabled) {
 			event.preventDefault();
-		});
-	}
+			return;
+		}
 
-	if (data.rawKeyEvents || data.useTextInput) {
-		edit.addEventListener('mouseup', function(event) {
-			if (edit.disabled) {
-				event.preventDefault();
-				return;
-			}
+		if (event.key === 'Enter') {
+			builder.callback('edit', 'keypress', edit, UNOKey.RETURN | modifier, builder);
+		} else if (event.key === 'Escape' || event.key === 'Esc') {
+			builder.callback('edit', 'keypress', edit, UNOKey.ESCAPE | modifier, builder);
+		} else if (event.key === 'Shift') {
+			modifier = modifier | UNOModifier.SHIFT;
+		} else if (event.key === 'Control') {
+			modifier = modifier | UNOModifier.CTRL;
+		} else if (event.key === 'Left' || event.key === 'ArrowLeft') {
+			setTimeout(function () { _sendSelection(edit, builder); }, 0);
+		} else if (event.key === 'Right' || event.key === 'ArrowRight') {
+			setTimeout(function () { _sendSelection(edit, builder); }, 0);
+		} else if (event.key === 'Up' || event.key === 'ArrowUp') {
+			setTimeout(function () { _sendSelection(edit, builder); }, 0);
+		} else if (event.key === 'Down' || event.key === 'ArrowDown') {
+			setTimeout(function () { _sendSelection(edit, builder); }, 0);
+		} else if (event.key === 'Home') {
+			setTimeout(function () { _sendSelection(edit, builder); }, 0);
+		} else if (event.key === 'End') {
+			setTimeout(function () { _sendSelection(edit, builder); }, 0);
+		}
+	});
 
-			builder.callback('edit', 'grab_focus', edit, null, builder);
-
-			_sendSelection(event.target, builder);
+	edit.addEventListener('keyup', function(event) {
+		if (edit.disabled) {
 			event.preventDefault();
-		});
-	}
+			return;
+		}
+
+		if (event.key === 'Shift') {
+			modifier = modifier & (~UNOModifier.SHIFT);
+		} else if (event.key === 'Control') {
+			modifier = modifier & (~UNOModifier.CTRL);
+		}
+	});
+
+	edit.addEventListener('blur', function() {
+		modifier = 0;
+	});
+
+	edit.addEventListener('mouseup', function(event) {
+		if (edit.disabled) {
+			event.preventDefault();
+			return;
+		}
+
+		builder.callback('edit', 'grab_focus', edit, null, builder);
+
+		_sendSelection(event.target, builder);
+		event.preventDefault();
+	});
+
+	edit._sendSelection = function () {
+		_sendSelection(edit, builder);
+	};
 
 	if (data.hidden)
 		L.DomUtil.addClass(edit, 'hidden');

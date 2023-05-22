@@ -956,7 +956,7 @@ L.Map = L.Evented.extend({
 	// Getter for the winId, see setWinId() for more.
 	getWinId: function () {
 		if (this.formulabar && this.formulabar.hasFocus())
-			return 0;
+			return 2;
 		return this._winId;
 	},
 

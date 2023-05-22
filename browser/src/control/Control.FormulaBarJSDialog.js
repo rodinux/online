@@ -3,7 +3,7 @@
  * L.Control.FormulaBarJSDialog
  */
 
-/* global _ _UNO UNOKey */
+/* global _ _UNO UNOKey UNOModifier */
 L.Control.FormulaBarJSDialog = L.Control.extend({
 	container: null,
 	builder: null,
@@ -70,8 +70,6 @@ L.Control.FormulaBarJSDialog = L.Control.extend({
 							id: 'sc_input_window',
 							type: 'formulabaredit',
 							text: text ? text : '',
-							rawKeyEvents: window.mode.isDesktop() ? true : undefined,
-							useTextInput: window.mode.isDesktop() ? undefined : true
 						},
 						{
 							id: 'expand',
@@ -94,8 +92,6 @@ L.Control.FormulaBarJSDialog = L.Control.extend({
 							id: 'sc_input_window',
 							type: 'formulabaredit',
 							text: text ? text : '',
-							rawKeyEvents: undefined,
-							useTextInput: true
 						},
 						{
 							id: 'expand',
@@ -162,8 +158,8 @@ L.Control.FormulaBarJSDialog = L.Control.extend({
 	},
 
 	callback: function(objectType, eventType, object, data, builder) {
+		var input = this.getInputField();
 		if (object.id === 'expand') {
-			var input = this.getInputField();
 			if (input)
 				this.toggleMultiLine(input);
 			return;
@@ -172,10 +168,34 @@ L.Control.FormulaBarJSDialog = L.Control.extend({
 		// in the core we have DrawingArea not TextView
 		if (object.id.indexOf('sc_input_window') === 0) {
 			objectType = 'drawingarea';
-			if (eventType === 'keypress' && data === UNOKey.RETURN || data === UNOKey.ESCAPE)
-				builder.map.focus();
-			else if (eventType === 'grab_focus')
+			if (eventType === 'keypress') {
+				if ((data & UNOKey.RETURN) && (data & UNOModifier.SHIFT)) {
+					return;
+				} if ((data & UNOKey.RETURN) && (data & UNOModifier.CTRL)) {
+					// ctrl + enter doesn't add new line in textarea
+					var currentText = input.value;
+					var start = input.selectionStart;
+					var end = input.selectionEnd;
+
+					input.value = currentText.substr(0, start) + '\n' + currentText.substr(end);
+					input.selectionStart = start + 1;
+					input.selectionEnd = input.selectionStart;
+
+					this.setupLastTextInputContent();
+					this.sendKeyEvent(0, 9472); // ctrl + enter
+					return;
+				} else if (data === UNOKey.RETURN) {
+					builder.map.focus();
+					this.sendKeyEvent(13, 1280); // enter
+					return;
+				} else if (data === UNOKey.ESCAPE) {
+					builder.map.focus();
+					this.sendKeyEvent(0, 1281); // esc
+					return;
+				}
+			} else if (eventType === 'grab_focus') {
 				builder.map.onFormulaBarFocus();
+			}
 		}
 
 		builder._defaultCallbackHandler(objectType, eventType, object, data, builder);
@@ -191,11 +211,9 @@ L.Control.FormulaBarJSDialog = L.Control.extend({
 	},
 
 	blur: function() {
-		if (!window.mode.isDesktop()) {
-			var textInput = this.map && this.map._textInput;
-			if (textInput && textInput._isComposing)
-				textInput._abortComposition();
-		}
+		var textInput = this.map && this.map._textInput;
+		if (textInput && textInput._isComposing)
+			textInput._abortComposition();
 
 		var input = this.getInputField();
 		if (input)
@@ -244,20 +262,51 @@ L.Control.FormulaBarJSDialog = L.Control.extend({
 		return this.getControl('sc_input_window');
 	},
 
+	// used in TextInput.js
+	refreshSelection: function() {
+		var control = this.getInputField();
+		if (!control)
+			return;
+
+		control._sendSelection();
+	},
+
+	// used in TextInput.js
 	getValue: function() {
 		var control = this.getInputField();
 		if (!control)
 			return;
 
-		return this.map._textInput._preSpaceChar + control.value + this.map._textInput._postSpaceChar;
+		var originalSelectionSize = control._endPos - control._startPos;
+		var addedChars = control.value.length - (control._originalLen - originalSelectionSize);
+		if (addedChars >= 0) {
+			return this.map._textInput._preSpaceChar
+				+ control.value.substr(control._startPos, addedChars)
+				+ this.map._textInput._postSpaceChar;
+		} else {
+			return control.value.substr(control._startPos, addedChars)
+				+ this.map._textInput._postSpaceChar;
+		}
 	},
 
+	// used in TextInput.js
 	setValue: function(newValue) {
 		var control = this.getInputField();
 		if (!control)
 			return;
 
 		control.value = newValue;
+	},
+
+	setupLastTextInputContent: function() {
+		var textInput = this.map._textInput;
+		var newContent = textInput.getValueAsCodePoints().slice(1, -1);
+		textInput.setupLastContent(newContent);
+	},
+
+	sendKeyEvent: function(keyCode, unoCode) {
+		var textInput = this.map._textInput;
+		textInput._sendKeyEvent(keyCode, unoCode);
 	},
 
 	onFormulaBar: function(e) {
@@ -306,12 +355,9 @@ L.Control.FormulaBarJSDialog = L.Control.extend({
 			var messageForInputField = innerData && innerData.control_id === 'sc_input_window';
 			var isSetTextMessage = innerData && innerData.action_type === 'setText';
 			var keepInputFocus = messageForInputField && this.hasFocus();
-			var textInput = this.map._textInput;
 
-			// on desktop we display what we get from the server
-			// on touch devices we allow to type into the field directly, so we cannot update always
-			var allowUpdate = window.mode.isDesktop()
-				|| !this.hasFocus() || (this.hasFocus() && this.dirty);
+			// using IME we allow to type into the field directly, so we cannot update always
+			var allowUpdate = !this.hasFocus() || (this.hasFocus() && this.dirty);
 
 			if (!allowUpdate && messageForInputField && isSetTextMessage)
 				return;
@@ -320,10 +366,8 @@ L.Control.FormulaBarJSDialog = L.Control.extend({
 
 			this.builder.executeAction(this.container, innerData);
 
-			if (!window.mode.isDesktop() && messageForInputField && this.hasFocus()) {
-				var newContent = textInput.getValueAsCodePoints().slice(1, -1);
-				textInput.setupLastContent(newContent);
-			}
+			if (messageForInputField && this.hasFocus())
+				this.setupLastTextInputContent();
 
 			if (keepInputFocus)
 				this.focus();
